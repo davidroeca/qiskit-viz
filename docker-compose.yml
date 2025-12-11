@@ -1,0 +1,80 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+      args:
+        USERID: ${USERID:-1001}
+    volumes:
+      - ./backend:/home/dev/src:delegated
+      - backend_venv:/home/dev/src/.venv
+      - backend_cache:/home/dev/.cache
+    environment:
+      - PYTHONUNBUFFERED=1
+    networks:
+      - qiskit-viz-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backend.rule=PathPrefix(`/api`)"
+      - "traefik.http.routers.backend.entrypoints=web"
+      - "traefik.http.services.backend.loadbalancer.server.port=8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: development
+      args:
+        USERID: ${USERID:-1001}
+    volumes:
+      - ./frontend:/home/node/src:delegated
+      - frontend_node_modules:/home/node/src/node_modules
+    environment:
+      - NODE_ENV=development
+      - API_URL_BASE=http://backend/api
+    networks:
+      - qiskit-viz-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.frontend.entrypoints=web"
+      - "traefik.http.routers.frontend.priority=1"
+      - "traefik.http.services.frontend.loadbalancer.server.port=5173"
+    depends_on:
+      backend:
+        condition: service_healthy
+  reverse-proxy:
+    image: "traefik:v3.6"
+    container_name: "traefik"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - qiskit-viz-network
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=qiskit-viz-network"
+      - "--entryPoints.web.address=:80"
+      - "--api.insecure=true"
+      - "--api.dashboard=true"
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+
+networks:
+  qiskit-viz-network:
+    driver: bridge
+
+volumes:
+  frontend_node_modules:
+  backend_venv:
+  backend_cache:
